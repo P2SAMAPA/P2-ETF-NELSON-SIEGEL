@@ -35,6 +35,24 @@ def main():
     df    = data_manager.load_master_data()
     today = datetime.now().strftime("%Y-%m-%d")
 
+    # ── Print all columns so we can see what's available ─────────────────────
+    print(f"\nMaster data shape: {df.shape}")
+    print(f"Columns ({len(df.columns)}): {list(df.columns)}")
+
+    # ── Auto-detect treasury columns ──────────────────────────────────────────
+    print("\n=== Auto-detecting treasury yield columns ===")
+    treasury_cols = data_manager.detect_treasury_cols(df)
+
+    if len(treasury_cols) < 4:
+        print(f"ERROR: Only {len(treasury_cols)} treasury columns found — need at least 4.")
+        print("Available columns in master data:")
+        for col in sorted(df.columns):
+            sample = df[col].dropna()
+            if len(sample) > 0:
+                print(f"  {col}: median={sample.median():.4f}, "
+                      f"n={len(sample)}, dtype={df[col].dtype}")
+        return
+
     # ── Extract NS factors once (shared across all universes / windows) ────────
     print("\n=== Fitting Nelson-Siegel yield curve ===")
     ns_factors_by_window = {}
@@ -42,21 +60,21 @@ def main():
         print(f"  Fitting NS factors — window {win}d...")
         factors = extract_ns_factors(
             df,
-            config.TREASURY_COLS,
+            treasury_cols,       # use auto-detected cols, not config hardcoded
             window=win,
             lambda_init=config.LAMBDA_INIT,
         )
         if factors.empty:
-            print(f"  No treasury data available for window {win}d, skipping")
+            print(f"  No NS factors for window {win}d, skipping")
             continue
         ns_factors_by_window[win] = factors
-        print(f"  Done — {len(factors)} factor observations, "
-              f"latest beta0={factors['beta0'].iloc[-1]:.4f}  "
-              f"beta1={factors['beta1'].iloc[-1]:.4f}  "
-              f"beta2={factors['beta2'].iloc[-1]:.4f}")
+        last = factors.iloc[-1]
+        print(f"  Done — {len(factors)} obs · "
+              f"β₀={last['beta0']:.4f} β₁={last['beta1']:.4f} "
+              f"β₂={last['beta2']:.4f} λ={last['lam']:.4f} RMSE={last['rmse']:.5f}")
 
     if not ns_factors_by_window:
-        print("No NS factors extracted — check treasury column names in master data")
+        print("No NS factors extracted — exiting")
         return
 
     all_results = {}
@@ -89,25 +107,19 @@ def main():
 
             try:
                 ns_betas = compute_etf_ns_betas(
-                    returns[available_tickers],
-                    factors,
-                    window=win,
-                )
+                    returns[available_tickers], factors, window=win)
             except Exception as e:
                 print(f"  Beta computation failed for {win}d: {e}")
                 continue
 
             if ns_betas.empty:
-                print(f"  No betas computed for {win}d")
+                print(f"  No betas for {win}d")
                 continue
 
             try:
                 scores = compute_ns_scores(
-                    returns[available_tickers],
-                    factors,
-                    ns_betas,
-                    score_lookback=config.NS_SCORE_LOOKBACK,
-                )
+                    returns[available_tickers], factors, ns_betas,
+                    score_lookback=config.NS_SCORE_LOOKBACK)
             except Exception as e:
                 print(f"  Score computation failed for {win}d: {e}")
                 continue
@@ -118,7 +130,8 @@ def main():
 
             score_dict = scores.to_dict()
             window_results[win] = {t: float(s) for t, s in score_dict.items()}
-            print(f"  Scores: {dict(sorted(score_dict.items(), key=lambda x: x[1], reverse=True))}")
+            top = sorted(score_dict.items(), key=lambda x: x[1], reverse=True)[:3]
+            print(f"  Top 3: {[(t, round(s,4)) for t, s in top]}")
 
             for etf, score in score_dict.items():
                 if np.isnan(score):
@@ -128,7 +141,7 @@ def main():
 
         # ── Fallback ──────────────────────────────────────────────────────────
         if not best_per_etf:
-            print("  No valid NS scores — falling back to historical mean return")
+            print("  Falling back to historical mean return")
             for etf in available_tickers:
                 mean_ret = returns[etf].iloc[-252:].mean()
                 if not np.isnan(mean_ret):
@@ -139,7 +152,7 @@ def main():
             all_windows[universe_name] = {"windows": {}}
             continue
 
-        # ── Tab 1: best window per ETF ────────────────────────────────────────
+        # ── Tab 1 ─────────────────────────────────────────────────────────────
         full_scores = {
             ticker: {"score": float(score), "best_window": int(win)}
             for ticker, (score, win) in best_per_etf.items()
@@ -149,35 +162,24 @@ def main():
             {"ticker": t, "ns_score": float(s), "best_window": int(w)}
             for t, (s, w) in sorted_etfs[:config.TOP_N]
         ]
-
         print(f"  Top {config.TOP_N}: {[e['ticker'] for e in top_etfs]}")
-        for e in top_etfs:
-            print(f"    {e['ticker']}: {e['ns_score']:.4f}  (window: {e['best_window']}d)")
 
         all_results[universe_name] = {
-            "top_etfs":       top_etfs,
-            "full_scores":    full_scores,
-            "window_results": window_results,
-            "run_date":       today,
+            "top_etfs": top_etfs, "full_scores": full_scores,
+            "window_results": window_results, "run_date": today,
         }
 
-        # ── Tab 2: per-window breakdown ───────────────────────────────────────
+        # ── Tab 2 ─────────────────────────────────────────────────────────────
         windows_tab2 = {}
-        for win, score_dict in window_results.items():
-            sorted_win = sorted(score_dict.items(), key=lambda x: x[1], reverse=True)
+        for win, sd in window_results.items():
+            sw = sorted(sd.items(), key=lambda x: x[1], reverse=True)
             windows_tab2[str(win)] = {
-                "top_etfs": [
-                    {"ticker": t, "ns_score": float(s)}
-                    for t, s in sorted_win[:config.TOP_N]
-                ],
-                "full_ranking": [
-                    {"ticker": t, "ns_score": float(s)}
-                    for t, s in sorted_win
-                ],
+                "top_etfs":    [{"ticker": t, "ns_score": float(s)} for t, s in sw[:config.TOP_N]],
+                "full_ranking":[{"ticker": t, "ns_score": float(s)} for t, s in sw],
             }
         all_windows[universe_name] = {"windows": windows_tab2, "run_date": today}
 
-    # ── Also save latest NS factor values for display in the app ──────────────
+    # ── NS factor summary for app display ────────────────────────────────────
     ns_summary = {}
     for win, factors in ns_factors_by_window.items():
         last = factors.iloc[-1]
@@ -196,16 +198,13 @@ def main():
     tab1_path = Path(f"results/nelson_siegel_{today}.json")
     with open(tab1_path, "w") as f:
         json.dump(convert_to_serializable({
-            "run_date":   today,
-            "ns_factors": ns_summary,
-            "universes":  all_results,
+            "run_date": today, "ns_factors": ns_summary, "universes": all_results,
         }), f, indent=2)
 
     tab2_path = Path(f"results/nelson_siegel_windows_{today}.json")
     with open(tab2_path, "w") as f:
         json.dump(convert_to_serializable({
-            "run_date":  today,
-            "universes": all_windows,
+            "run_date": today, "universes": all_windows,
         }), f, indent=2)
 
     import push_results
