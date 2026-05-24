@@ -1,16 +1,17 @@
 import os
 
-HF_TOKEN   = os.environ.get("HF_TOKEN", "")
-DATA_REPO  = "P2SAMAPA/fi-etf-macro-signal-master-data"
+HF_TOKEN    = os.environ.get("HF_TOKEN", "")
+DATA_REPO   = "P2SAMAPA/fi-etf-macro-signal-master-data"
 OUTPUT_REPO = "P2SAMAPA/p2-etf-nelson-siegel-results"
 
-# FI universe only — NS is a rate/duration model, equity ETFs not applicable
-FI_TICKERS = ["TLT", "VCIT", "LQD", "HYG", "VNQ", "GLD", "SLV"]
-EQUITY_TICKERS = [
+# Universes updated to match actual master data columns
+FI_TICKERS        = ["TLT", "VCIT", "LQD", "HYG", "VNQ", "SLV", "GLD"]
+EQUITY_TICKERS    = [
     "SPY", "QQQ", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY",
-    "XLP", "XLU", "GDX", "XME", "IWF", "XSD", "XBI", "IWM", "IWD", "IWO"
+    "XLP", "XLU", "GDX", "XME", "IWM", "IWF", "XSD", "XBI",
+    "XLB", "XLRE", "IWD", "IWO",
 ]
-COMBINED_TICKERS = FI_TICKERS + EQUITY_TICKERS
+COMBINED_TICKERS  = FI_TICKERS + EQUITY_TICKERS
 
 UNIVERSES = {
     "FI_COMMODITIES": FI_TICKERS,
@@ -18,8 +19,8 @@ UNIVERSES = {
     "COMBINED":       COMBINED_TICKERS,
 }
 
-# Treasury maturities available in the master data as column names
-# These are used to fit the Nelson-Siegel yield curve
+# Treasury columns — will be fetched by update_master_data.py and added to parquet
+# These match the FRED series names used in update_master_data.py
 TREASURY_COLS = {
     "DGS1MO": 1/12,
     "DGS3MO": 3/12,
@@ -37,7 +38,7 @@ TREASURY_COLS = {
 WINDOWS = [63, 126, 252, 504]
 
 # NS signal construction
-LAMBDA_INIT  = 0.7    # initial decay parameter for NS fitting
-NS_SCORE_LOOKBACK = 21  # days to compute z-score of NS factors
+LAMBDA_INIT       = 0.7    # initial decay parameter for NS fitting
+NS_SCORE_LOOKBACK = 21     # days to compute recent factor change
 
 TOP_N = 3
