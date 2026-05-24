@@ -2,7 +2,7 @@ name: Daily Nelson-Siegel Run
 
 on:
   schedule:
-    - cron: "30 23 * * 1-6"   # 21:00 UTC = 4pm ET Mon-Fri
+    - cron: "30 23 * * 1-5"   # 21:00 UTC = 4pm ET Mon-Fri
   workflow_dispatch:
 
 jobs:
@@ -22,15 +22,3 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python trainer.py
-
-      - name: Commit results
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No files have been modified since last commit. Skipping to prevent empty commit."
-          else
-            git commit -m "Update nelson_siegel results $(date +'%Y-%m-%d')"
-            git push
-          fi
