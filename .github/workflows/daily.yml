@@ -2,7 +2,7 @@ name: Daily Nelson-Siegel Run
 
 on:
   schedule:
-    - cron: "30 03 * * 1-6"   # 21:00 UTC = 4pm ET Mon-Fri
+    - cron: "30 00 * * 1-6"   # 21:00 UTC = 4pm ET Mon-Fri
   workflow_dispatch:
 
 jobs:
